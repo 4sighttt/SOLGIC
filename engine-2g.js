@@ -5,7 +5,7 @@
 
 'use strict';
 
-const ENGINE_2G_VERSION = 'engine-2g v202';
+const ENGINE_2G_VERSION = 'engine-2g v203';
 
 function infer2G(io){
       const n=io.size|0, minesTarget=io.mines|0;
@@ -61,6 +61,41 @@ function infer2G(io){
           else if(asnCell[j]===-1){vs.push(j);numNeighSet.add(j);}
         }
         numCons.push({v:numVal[i]|0,fixedM,vs});
+      }
+
+      // =====================================================================
+      // 전처리: 숫자 제약 전파로 확정 안전 셀 계산 (preCheckSafe 탐색 전)
+      // 확정 안전 셀은 mineAvail에서 제거하여 hasValidGroupFor 탐색 정확도 향상
+      // =====================================================================
+      const preConstraintSafe = new Set();
+      {
+        const tmpSafe = new Set();
+        const tmpMine = new Set();
+        for(let i=0;i<N;i++){
+          if(asnCell[i]===0) tmpSafe.add(i);
+          else if(asnCell[i]===1) tmpMine.add(i);
+        }
+        let changed = true;
+        while(changed){
+          changed = false;
+          for(const c of numCons){
+            let m = c.fixedM;
+            const unk = [];
+            for(const j of c.vs){
+              if(tmpMine.has(j)) m++;
+              else if(!tmpSafe.has(j)) unk.push(j);
+            }
+            const rem = c.v - m;
+            if(rem < 0 || rem > unk.length) continue;
+            if(rem === 0){
+              for(const j of unk){ if(!tmpSafe.has(j)){ tmpSafe.add(j); preConstraintSafe.add(j); changed=true; } }
+            }
+            if(rem === unk.length && rem > 0){
+              for(const j of unk){ if(!tmpMine.has(j)){ tmpMine.add(j); changed=true; } }
+            }
+          }
+        }
+        for(const j of preConstraintSafe) mineAvail.delete(j);
       }
 
       // =====================================================================
