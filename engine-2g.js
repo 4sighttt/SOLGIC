@@ -820,7 +820,9 @@ function infer2G(io){
         let changed = true;
         while(changed){
           changed = false;
+          // 숫자 제약 이웃 셀에 대해서만 가정 추론 (무관한 셀은 모순 발생 불가)
           for(const cell of unknownSet){
+            if(!numNeighSet.has(cell)) continue;
             if(detMines.has(cell)||detSafes.has(cell)) continue;
 
             // (A) 가정: cell이 지뢰 → 모순이면 SAFE
