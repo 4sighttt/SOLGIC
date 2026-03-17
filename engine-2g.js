@@ -5,7 +5,7 @@
 
 'use strict';
 
-const ENGINE_2G_VERSION = 'engine-2g v201';
+const ENGINE_2G_VERSION = 'engine-2g v202';
 
 function infer2G(io){
       const n=io.size|0, minesTarget=io.mines|0;
@@ -126,7 +126,31 @@ function infer2G(io){
 
         // 셀 C를 포함하는 유효한 4칸 연결 그룹 존재 여부 탐색
         // 숫자 제약 조기 차단으로 가지치기 강화
-        function hasValidGroupFor(startCell){
+        // extraFixed: 가정 그룹을 임시 fixedMine으로 취급하는 추가 셀 Set (재귀 호출용)
+        function hasValidGroupFor(startCell, extraFixed){
+          const ef = extraFixed || new Set();
+          // 임시 컴포넌트 계산: fixedMineSet + extraFixed
+          const allFixed = new Set([...fixedMineSet, ...ef]);
+          const efVisited = new Set();
+          const efComponents = [];
+          for(const start of allFixed){
+            if(efVisited.has(start)) continue;
+            const comp = new Set();
+            const q2 = [start]; efVisited.add(start);
+            while(q2.length){
+              const cur = q2.shift(); comp.add(cur);
+              for(const nb of neigh4[cur]){
+                if(!efVisited.has(nb) && allFixed.has(nb)){
+                  efVisited.add(nb); q2.push(nb);
+                }
+              }
+            }
+            efComponents.push(comp);
+          }
+          const efCellToComp = new Map();
+          for(const comp of efComponents)
+            for(const c of comp) efCellToComp.set(c, comp);
+
           let found = false;
           function dfs(cells, cset){
             if(found) return;
@@ -137,13 +161,52 @@ function infer2G(io){
               if(m > con.v) return;
             }
             if(cells.length === 4){
-              if(isValidGroup(cells)) found = true;
+              if(!isValidGroup(cells)) return;
+              // 2G 그룹 간 인접 충돌 검사:
+              // 이 그룹과 4방향 인접한 다른 fixedMine 컴포넌트(extraFixed 포함)가
+              // 이 그룹과 합쳐져 4칸을 초과하는지 체크
+              const gset = new Set(cells);
+              for(const c of cells){
+                for(const nb of neigh4[c]){
+                  if(gset.has(nb)) continue;
+                  if(!allFixed.has(nb)) continue;
+                  const nbComp = efCellToComp.get(nb);
+                  if(!nbComp) continue;
+                  // 이 컴포넌트 중 gset 밖에 있는 셀 수
+                  const outside = [...nbComp].filter(x => !gset.has(x));
+                  if(outside.length + cells.length > 4){ return; }
+                }
+              }
+              // 인접 충돌 없음: 이 그룹을 임시 고정으로 추가하고
+              // 기존 미완성 fixedMine 컴포넌트들이 여전히 완성 가능한지 검사
+              const newEf = new Set([...allFixed, ...cells]);
+              // startCell의 컴포넌트만 검사 (다른 컴포넌트는 별도 hasValidGroupFor로 처리)
+              // 이 그룹이 fixedMineSet의 미완성 컴포넌트를 흡수하는 경우 체크
+              for(const comp of efComponents){
+                if(comp.size >= 4) continue; // 이미 완성
+                // 이 컴포넌트가 현재 그룹(cells)에 인접하지 않으면 무관
+                let adjacent = false;
+                for(const c of comp){
+                  for(const nb of neigh4[c]){
+                    if(gset.has(nb)){ adjacent = true; break; }
+                  }
+                  if(adjacent) break;
+                }
+                if(!adjacent) continue;
+                // 이 컴포넌트가 현재 그룹에 흡수되지 않았으면 (gset과 겹치지 않으면)
+                // 현재 그룹을 extraFixed로 추가한 상태에서 완성 가능한지 검사
+                const compStart = [...comp].find(c => !gset.has(c));
+                if(compStart === undefined) continue; // 완전히 흡수됨
+                if(!hasValidGroupFor(compStart, newEf)) return;
+              }
+              found = true;
               return;
             }
             for(const c of cells){
               for(const nb of neigh4[c]){
                 if(cset.has(nb)) continue;
-                if(!mineAvail.has(nb)) continue;
+                if(!mineAvail.has(nb) && !ef.has(nb)) continue;
+                if(ef.has(nb)) continue; // extraFixed 셀은 확장 대상 아님
                 cset.add(nb); cells.push(nb);
                 dfs(cells, cset);
                 cells.pop(); cset.delete(nb);
