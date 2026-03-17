@@ -403,8 +403,10 @@ function infer2G(io){
                 }
               }
               if(B_only.length>0){
-                const shared_min=Math.max(0,remA-A_only.length);
-                const B_only_needed=remB-shared_min;
+                // A의 shared 최대 기여 = min(shared.length, remA)
+                // B_only 최소 필요 = max(0, remB - shared_max)
+                const shared_max=Math.min(shared.length,remA);
+                const B_only_needed=Math.max(0,remB-shared_max);
                 if(B_only_needed>0&&B_only_needed===B_only.length){
                   for(const cell of B_only){
                     if(!alreadySafe.has(cell)&&!alreadyMine.has(cell)){
@@ -420,16 +422,17 @@ function infer2G(io){
         return changed;
       }
 
-      // 통합 루프: sharedZone → logicDeductions → groupCompletionDeductions → groupCoverageDeductions 교대
+      // 통합 루프: groupCompletion → groupExpansion → logicDeductions → groupCoverage 교대
       {
         let outerChanged=true;
         while(outerChanged){
           outerChanged=false;
           if(runSharedZone(mine,safe)) outerChanged=true;
+          if(groupCompletionDeductions(mine,safe)) outerChanged=true;
+          if(groupExpansionSafeDeductions(mine,safe)) outerChanged=true;
           const pm=mine.length, ps=safe.length;
           logicDeductions(mine,safe);
           if(mine.length>pm||safe.length>ps) outerChanged=true;
-          if(groupCompletionDeductions(mine,safe)) outerChanged=true;
           if(groupCoverageDeductions(mine,safe)) outerChanged=true;
         }
         // 중복 제거
@@ -634,14 +637,23 @@ function infer2G(io){
 
           const otherMines=new Set([...kmSet].filter(i=>!compSet.has(i)));
 
-          // 모든 유효 4칸 완성 열거
+          // 모든 유효 4칸 완성 열거 (숫자 제약 초과 체크 포함)
           const allCompletions=[];
           const ENUM_LIMIT=1000;
           let enumNodes=0;
 
           function enumGroups(current,currentSet){
             if(enumNodes++>ENUM_LIMIT) return;
-            if(current.length===4){allCompletions.push([...current]);return;}
+            if(current.length===4){
+              // 숫자 제약 초과 체크
+              for(const c of numCons){
+                let m=c.fixedM;
+                for(const j of c.vs) if(currentSet.has(j)) m++;
+                if(m>c.v) return;
+              }
+              allCompletions.push([...current]);
+              return;
+            }
             for(const c of current){
               for(const nb of neigh4[c]){
                 if(currentSet.has(nb)) continue;
@@ -653,6 +665,14 @@ function infer2G(io){
                 }
                 if(adjOther) continue;
                 if(!unknownSet.has(nb)&&!kmSet.has(nb)) continue;
+                // 중간 단계 숫자 제약 초과 조기 차단
+                let overLimit=false;
+                for(const c2 of numCons){
+                  let m=c2.fixedM;
+                  for(const j of c2.vs) if(currentSet.has(j)||j===nb) m++;
+                  if(m>c2.v){overLimit=true;break;}
+                }
+                if(overLimit) continue;
                 currentSet.add(nb); current.push(nb);
                 enumGroups(current,currentSet);
                 current.pop(); currentSet.delete(nb);
@@ -674,14 +694,27 @@ function infer2G(io){
             const rem=c.v-fixM;
             if(rem<=0||rem>unkList.length) continue;
 
-            // 모든 완성에 공통으로 포함되고 이 제약의 unknown 이웃인 셀 집합
+            // Pattern 1: inAll - 모든 완성에 공통으로 포함된 셀 → rem=1이면 나머지 SAFE
             const inAll=unkList.filter(j=>allCompletions.every(g=>g.includes(j)));
-            if(inAll.length===0) continue;
-
-            // 모든 완성이 inAll 중 ≥1개를 포함 → rem=1이면 나머지 SAFE
-            if(rem===1){
+            if(inAll.length>0 && rem===1){
               for(const j of unkList){
                 if(!inAll.includes(j)&&!ksSet.has(j)){
+                  const[x,y]=xy(j); const lb=lbl(x,y);
+                  if(!safeArr.includes(lb)){safeArr.push(lb);changed=true;}
+                }
+              }
+              continue;
+            }
+
+            // Pattern 2: hitting set - 모든 완성이 unkList에서 최소 1개를 포함하고
+            // 그 포함된 셀들의 합집합이 unkList의 진부분집합이면 → 나머지 SAFE
+            if(rem===1){
+              const coverSets=allCompletions.map(g=>unkList.filter(j=>g.includes(j)));
+              if(coverSets.some(s=>s.length===0)) continue;
+              const appearsInAny=new Set(coverSets.flat());
+              const notInAny=unkList.filter(j=>!appearsInAny.has(j));
+              for(const j of notInAny){
+                if(!ksSet.has(j)){
                   const[x,y]=xy(j); const lb=lbl(x,y);
                   if(!safeArr.includes(lb)){safeArr.push(lb);changed=true;}
                 }
@@ -692,10 +725,93 @@ function infer2G(io){
         return changed;
       }
 
+      // =====================================================================
+      // groupExpansionSafeDeductions:
+      // 크기 k(<4)인 지뢰 컴포넌트 C에 대해:
+      //   dangerZone = compSet ∪ compAdjSet (C와 직접 인접한 unknown 포함)
+      //   Y ∉ compAdjSet (직접 확장 후보 아님) 이고
+      //   Y의 4방향 이웃 중 dangerZone 외부로 탈출 가능한 경로가 없으면,
+      //   Y를 포함하는 4칸 그룹을 만들 때 반드시 C와 4방향 인접 → 2G 위반
+      //   → Y = 확정 안전
+      //
+      // 탈출 가능 경로: Y 이웃 Z가 (unknown OR 다른kmSet) 이고 dangerZone 외부
+      //   단, Z가 다른 kmSet 셀이면 Z-컴포넌트와 합류하는 것이므로 탈출로 인정
+      //   (Z가 C와 별도 컴포넌트 → Z 포함 그룹이 C와 인접하지 않을 수 있음)
+      // =====================================================================
+      function groupExpansionSafeDeductions(mineArr, safeArr){
+        const kmSet=new Set([...fixedMineSet]);
+        for(const s of mineArr){const p=s.charCodeAt(0)-65;const q=parseInt(s.slice(1))-1;kmSet.add(idx(p,q));}
+        const ksSet=new Set();
+        for(let i=0;i<N;i++) if(asnCell[i]===0) ksSet.add(i);
+        for(const s of safeArr){const p=s.charCodeAt(0)-65;const q=parseInt(s.slice(1))-1;ksSet.add(idx(p,q));}
+
+        let changed=false;
+        const visited=new Set();
+
+        for(const start of kmSet){
+          if(visited.has(start)) continue;
+          const comp=[],compSet=new Set();
+          const bq=[start]; visited.add(start);
+          while(bq.length){
+            const cur=bq.shift(); comp.push(cur); compSet.add(cur);
+            for(const nb of neigh4[cur]){
+              if(!visited.has(nb)&&kmSet.has(nb)){visited.add(nb);bq.push(nb);}
+            }
+          }
+          if(comp.length>=4) continue;
+
+          // compAdjSet: C와 직접 4방향 인접한 unknown 셀 (직접 확장 후보)
+          const compAdjSet=new Set();
+          for(const c of comp){
+            for(const nb of neigh4[c]){
+              if(!compSet.has(nb)&&unknownSet.has(nb)&&!ksSet.has(nb)&&!kmSet.has(nb)){
+                compAdjSet.add(nb);
+              }
+            }
+          }
+          // dangerZone: compSet ∪ compAdjSet
+          const dangerZone=new Set([...compSet,...compAdjSet]);
+
+          // Y ∉ compAdjSet인 unknown 셀에 대해 SAFE 판정
+          for(const y of unknownSet){
+            if(ksSet.has(y)||kmSet.has(y)) continue;
+            if(compAdjSet.has(y)) continue; // 직접 확장 후보는 대상 아님
+
+            // Y가 dangerZone과 인접하지 않으면 이 컴포넌트와 무관
+            let adjDanger=false;
+            for(const nb of neigh4[y]){if(dangerZone.has(nb)){adjDanger=true;break;}}
+            if(!adjDanger) continue;
+
+            // Y의 4방향 이웃 중 dangerZone 외부로 탈출 가능한 경로 확인
+            // 탈출 가능: unknown이고 dangerZone 외부 (kmSet인 경우도 포함 — 별도 컴포넌트 방향)
+            let hasEscapePath=false;
+            for(const nb of neigh4[y]){
+              if(ksSet.has(nb)) continue;          // 안전칸 → 탈출 안됨
+              if(dangerZone.has(nb)) continue;     // dangerZone 내부 → 탈출 안됨
+              // unknown 또는 다른 kmSet 셀이면 탈출 가능
+              if(unknownSet.has(nb)||kmSet.has(nb)){
+                hasEscapePath=true;
+                break;
+              }
+            }
+
+            if(!hasEscapePath){
+              const lb=lbl(...xy(y));
+              if(!safeArr.includes(lb)){safeArr.push(lb);changed=true;}
+            }
+          }
+        }
+        return changed;
+      }
+
       // 논리 추론: 각 미지 셀에 대해 가정 → 전파 → 모순이면 반대값 확정
       function logicDeductions(knownMines, knownSafes){
-        const detMines = new Set(knownMines.map(s=>{const p=s.charCodeAt(0)-65;const q=parseInt(s.slice(1))-1;return idx(p,q);}));
-        const detSafes = new Set(knownSafes.map(s=>{const p=s.charCodeAt(0)-65;const q=parseInt(s.slice(1))-1;return idx(p,q);}));
+        // baseMines/baseSafes를 고정 기준으로 사용 → 누적 오탐 방지
+        const toIdx=s=>{const p=s.charCodeAt(0)-65;const q=parseInt(s.slice(1))-1;return idx(p,q);};
+        const baseMines=new Set(knownMines.map(toIdx));
+        const baseSafes=new Set(knownSafes.map(toIdx));
+        const detMines=new Set(baseMines);
+        const detSafes=new Set(baseSafes);
 
         let changed = true;
         while(changed){
