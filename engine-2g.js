@@ -342,8 +342,8 @@ function infer2G(io){
 
       // 숫자 제약이 충분하지 않으면 전수 탐색 스킵 (브라우저 멈춤 방지)
       // frontier/bg 그룹 수가 임계값 초과 시 논리 엔진만 실행
-      const BT_FRONTIER_LIMIT = 40;
-      const BT_BG_LIMIT = 100;
+      const BT_FRONTIER_LIMIT = 20;
+      const BT_BG_LIMIT = 30;
       const skipBT = frontierGroups.length > BT_FRONTIER_LIMIT || bgGroups.length > BT_BG_LIMIT;
       const r = skipBT ? 'budget' : btGroups(0,numGroupsTotal);
       const checkLines=[ENGINE_2G_VERSION];
