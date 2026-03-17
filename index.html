@@ -303,6 +303,7 @@ End memo.
           <select id="modeSel">
 <option value="normal" selected>Normal</option>
 <option value="w">W</option>
+<option value="2g">2G</option>
           </select>
         </label>
         <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
@@ -372,6 +373,7 @@ End memo.
   </div>
 </div>
 
+<script src="engine-2g.js"></script>
 <script>
 (() => {
   const boardEl = document.getElementById('board');
@@ -995,6 +997,21 @@ End memo.
           }
         }
       }
+    } else if (m === '2G') {
+      if (modeSel) modeSel.value = '2g';
+      setMode('2g');
+      for (let y=0; y<n; y++){
+        for (let x=0; x<n; x++){
+          const tok = obj.board?.[y]?.[x];
+          if (!tok) continue;
+          const cell = STATE.normal[y][x];
+          if (tok.t === 'e') cell.kind = 'empty';
+          else if (tok.t === 'q') cell.kind = 'q';
+          else if (tok.t === 'f') cell.kind = 'flag';
+          else if (tok.t === 'n'){ cell.kind = 'num'; cell.v = Math.trunc(+tok.v || 0); }
+          else cell.kind = 'empty';
+        }
+      }
     } else {
       // default to normal
       if (modeSel) modeSel.value = 'normal';
@@ -1244,6 +1261,17 @@ End memo.
     ioMode: 'W',
     infer(){
       return {note:'(no engine)'};
+    }
+  });
+
+  registerMode('2g', {
+    label: '2G',
+    ioMode: '2G',
+    infer(io){
+      if (typeof infer2G !== 'function'){
+        return {ok:false, checkLines:['engine-2g.js not loaded'], safe:[], mine:[], sol:0};
+      }
+      return infer2G(io);
     }
   });
 
