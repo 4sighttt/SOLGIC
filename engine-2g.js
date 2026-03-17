@@ -5,6 +5,8 @@
 
 'use strict';
 
+const ENGINE_2G_VERSION = 'engine-2g v201';
+
 function infer2G(io){
       const n=io.size|0, minesTarget=io.mines|0;
       const inb=(x,y)=>x>=0&&y>=0&&x<n&&y<n;
@@ -13,7 +15,7 @@ function infer2G(io){
       const lbl=(x,y)=>String.fromCharCode(65+x)+String(y+1);
 
       if(minesTarget%4!==0){
-        return {ok:false,checkLines:[`mines=${minesTarget} must be divisible by 4`],safe:[],mine:[],sol:0};
+        return {ok:false,checkLines:[ENGINE_2G_VERSION, `mines=${minesTarget} must be divisible by 4`],safe:[],mine:[],sol:0};
       }
       const numGroupsTotal=minesTarget/4|0;
 
@@ -339,7 +341,7 @@ function infer2G(io){
       }
 
       const r=btGroups(0,numGroupsTotal);
-      const checkLines=[];
+      const checkLines=[ENGINE_2G_VERSION];
 
       // 전처리 결과 반영 (preCheckSafe)
       const preCheckSafeLabels=[];
@@ -443,7 +445,7 @@ function infer2G(io){
         checkLines.push(`deduce: mine=${mine.length} safe=${safe.length}`);
         return { ok:true, checkLines, fixedMines:fixedMineSet.size, safe, mine, sol:0 };
       } else if(sol===0){
-        return {ok:false,checkLines:['contradiction: no solutions'],safe:[],mine:[],sol:0};
+        return {ok:false,checkLines:[ENGINE_2G_VERSION,'contradiction: no solutions'],safe:[],mine:[],sol:0};
       } else {
         checkLines.push('OK');
         checkLines.push(`solutions=${sol}`);
