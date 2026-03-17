@@ -61,11 +61,115 @@ function infer2G(io){
         numCons.push({v:numVal[i]|0,fixedM,vs});
       }
 
+      // =====================================================================
+      // 전처리: 셀 단위 2G 유효성 검사 (allGroups 열거 이전에 실행)
+      // 미지 셀 C가 지뢰가 되려면 C를 포함하는 유효한 4칸 연결 그룹이 존재해야 함.
+      // 숫자 제약 조기 차단으로 H6 같은 케이스를 빠르게 SAFE 확정.
+      // =====================================================================
+      const preCheckSafe = new Set();
+      {
+        // 플래그 연결 컴포넌트 계산
+        const flagVisited = new Set();
+        const flagComponents = [];
+        for(const start of fixedMineSet){
+          if(flagVisited.has(start)) continue;
+          const comp = new Set();
+          const q = [start]; flagVisited.add(start);
+          while(q.length){
+            const cur = q.shift(); comp.add(cur);
+            for(const nb of neigh4[cur]){
+              if(!flagVisited.has(nb) && fixedMineSet.has(nb)){
+                flagVisited.add(nb); q.push(nb);
+              }
+            }
+          }
+          flagComponents.push(comp);
+        }
+        const cellToComp = new Map();
+        for(const comp of flagComponents)
+          for(const c of comp) cellToComp.set(c, comp);
+
+        // 그룹(4칸 배열) 유효성 검사
+        function isValidGroup(group){
+          const gset = new Set(group);
+          const flagsIn = group.filter(c => fixedMineSet.has(c));
+          if(flagsIn.length > 0){
+            const comp = cellToComp.get(flagsIn[0]);
+            if(!comp) return false;
+            for(const f of flagsIn)
+              if(cellToComp.get(f) !== comp) return false;
+            const outside = [...comp].filter(c => !gset.has(c));
+            if(outside.length + group.length > 4) return false;
+          }
+          for(const c of group){
+            for(const nb of neigh4[c]){
+              if(gset.has(nb)) continue;
+              if(!fixedMineSet.has(nb)) continue;
+              const nbComp = cellToComp.get(nb);
+              if(flagsIn.length > 0){
+                if(nbComp !== cellToComp.get(flagsIn[0])) return false;
+              } else {
+                if(nbComp && nbComp.size + group.length > 4) return false;
+              }
+            }
+          }
+          // 숫자 제약 초과 금지
+          for(const c of numCons){
+            let m = c.fixedM;
+            for(const j of c.vs) if(gset.has(j)) m++;
+            if(m > c.v) return false;
+          }
+          return true;
+        }
+
+        // 셀 C를 포함하는 유효한 4칸 연결 그룹 존재 여부 탐색
+        // 숫자 제약 조기 차단으로 가지치기 강화
+        function hasValidGroupFor(startCell){
+          let found = false;
+          function dfs(cells, cset){
+            if(found) return;
+            // 조기 차단: 현재까지 추가된 셀로 이미 숫자 제약 초과면 중단
+            for(const con of numCons){
+              let m = con.fixedM;
+              for(const j of con.vs) if(cset.has(j)) m++;
+              if(m > con.v) return;
+            }
+            if(cells.length === 4){
+              if(isValidGroup(cells)) found = true;
+              return;
+            }
+            for(const c of cells){
+              for(const nb of neigh4[c]){
+                if(cset.has(nb)) continue;
+                if(!mineAvail.has(nb)) continue;
+                cset.add(nb); cells.push(nb);
+                dfs(cells, cset);
+                cells.pop(); cset.delete(nb);
+                if(found) return;
+              }
+            }
+          }
+          dfs([startCell], new Set([startCell]));
+          return found;
+        }
+
+        for(const cell of unknownSet){
+          if(!hasValidGroupFor(cell)) preCheckSafe.add(cell);
+        }
+      }
+
       // Enumerate all 4-cell connected groups from mineAvail
+      // 숫자 제약 조기 차단으로 열거량 감소
       const allGroups=[];
       {
         const seen=new Set();
         function dfs4(cells,cellSet,minNext){
+          // 조기 차단: 현재 셀 조합이 숫자 제약 초과 시 중단
+          for(const con of numCons){
+            let m = con.fixedM;
+            for(const j of con.vs) if(cellSet.has(j)) m++;
+            if(m > con.v) return;
+          }
           if(cells.length===4){
             const key=cells.slice().sort((a,b)=>a-b).join(',');
             if(!seen.has(key)){seen.add(key);allGroups.push(cells.slice());}
@@ -140,114 +244,7 @@ function infer2G(io){
         }
       }
 
-      // =====================================================================
-      // 전처리: 셀 단위 2G 유효성 검사
-      //
-      // 핵심 논리:
-      //   미지 셀 C가 지뢰가 되려면, C를 포함하는 유효한 4칸 연결 그룹이
-      //   하나 이상 존재해야 한다.
-      //   유효 = 기존 플래그 컴포넌트 규칙 준수 + 숫자 제약 위반 없음
-      //   → 없으면 확정 안전.
-      // =====================================================================
-      const preCheckSafe = new Set();
-
-      {
-        // 플래그 연결 컴포넌트 계산
-        const flagVisited = new Set();
-        const flagComponents = [];
-        for(const start of fixedMineSet){
-          if(flagVisited.has(start)) continue;
-          const comp = new Set();
-          const q = [start]; flagVisited.add(start);
-          while(q.length){
-            const cur = q.shift(); comp.add(cur);
-            for(const nb of neigh4[cur]){
-              if(!flagVisited.has(nb) && fixedMineSet.has(nb)){
-                flagVisited.add(nb); q.push(nb);
-              }
-            }
-          }
-          flagComponents.push(comp);
-        }
-
-        // 각 셀 → 속한 플래그 컴포넌트
-        const cellToComp = new Map();
-        for(const comp of flagComponents)
-          for(const c of comp) cellToComp.set(c, comp);
-
-        // 그룹(4칸 배열) 유효성 검사
-        function isValidGroup(group){
-          const gset = new Set(group);
-          const flagsIn = group.filter(c => fixedMineSet.has(c));
-
-          // 조건1: 그룹 내 플래그들이 모두 같은 컴포넌트
-          if(flagsIn.length > 0){
-            const comp = cellToComp.get(flagsIn[0]);
-            if(!comp) return false;
-            for(const f of flagsIn)
-              if(cellToComp.get(f) !== comp) return false;
-            // 조건2: 컴포넌트에서 그룹 밖 셀 + 그룹 전체 <= 4
-            const outside = [...comp].filter(c => !gset.has(c));
-            if(outside.length + group.length > 4) return false;
-          }
-
-          // 조건3: 그룹 외부 플래그와 4방향 인접 금지
-          // (다른 컴포넌트와 붙으면 2G 규칙 위반)
-          for(const c of group){
-            for(const nb of neigh4[c]){
-              if(gset.has(nb)) continue;
-              if(!fixedMineSet.has(nb)) continue;
-              const nbComp = cellToComp.get(nb);
-              if(flagsIn.length > 0){
-                // 그룹에 플래그 있음: 다른 컴포넌트와 인접하면 충돌
-                if(nbComp !== cellToComp.get(flagsIn[0])) return false;
-              } else {
-                // 그룹에 플래그 없음: 외부 플래그 컴포넌트와 인접
-                // → 이 그룹이 그 컴포넌트에 붙게 됨
-                // 컴포넌트 크기 + 그룹 크기(4) > 4 이면 위반
-                if(nbComp && nbComp.size + group.length > 4) return false;
-              }
-            }
-          }
-
-          // 조건4: 숫자 제약 초과 금지
-          for(const c of numCons){
-            let m = c.fixedM;
-            for(const j of c.vs) if(gset.has(j)) m++;
-            if(m > c.v) return false;
-          }
-          return true;
-        }
-
-        // 셀 C를 포함하는 유효한 4칸 연결 그룹 존재 여부 탐색
-        // DFS로 직접 생성 (allGroups 순회 대신)
-        function hasValidGroupFor(startCell){
-          let found = false;
-          function dfs(cells, cset){
-            if(found) return;
-            if(cells.length === 4){
-              if(isValidGroup(cells)) found = true;
-              return;
-            }
-            for(const c of cells){
-              for(const nb of neigh4[c]){
-                if(cset.has(nb)) continue;
-                if(!mineAvail.has(nb)) continue;
-                cset.add(nb); cells.push(nb);
-                dfs(cells, cset);
-                cells.pop(); cset.delete(nb);
-                if(found) return;
-              }
-            }
-          }
-          dfs([startCell], new Set([startCell]));
-          return found;
-        }
-
-        for(const cell of unknownSet){
-          if(!hasValidGroupFor(cell)) preCheckSafe.add(cell);
-        }
-      }
+      // preCheckSafe: 위로 이동됨 (allGroups 열거 이전에 실행)
 
       // Count bg selections of size k given initially-blocked bg indices
       function countBgWays(k, initBlocked){
