@@ -1,0 +1,1257 @@
+<!doctype html>
+<html lang="en">
+<head>
+
+<!--
+[BOYOUNG_INTERNAL_MEMO_TILE_STATES]
+Tile semantics (IMPORTANT):
+- '.' (t:'e', UI empty): UNOPENED / UNKNOWN cell. This is the ONLY type that the solver may propose SAFE/MINE for.
+- '?' (t:'q', UI q): OPENED SAFE tile with UNKNOWN number (already opened; cannot be opened again). Treat as SAFE-fixed, NOT a candidate.
+- number (t:'n', v=k): OPENED SAFE tile with known clue number k.
+- 'F' (t:'f'): flagged mine (user mark / or confirmed mine depending on mode).
+
+Rule: NEVER generate or display SAFE/MINE actions on '?' tiles.
+End memo.
+-->
+
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Solgic3-0.0.0</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#111827; --panel2:#0f172a;
+    --text:#e5e7eb; --muted:#9ca3af; --line:#243041;
+    --accent:#60a5fa; --good:#22c55e; --bad:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+    background:var(--bg); color:var(--text);
+  }
+  .wrap{
+    min-height:100vh;
+    display:flex; align-items:center; justify-content:center;
+    padding:18px;
+  }
+  .app{
+    width:min(1300px, 96vw);
+    display:flex; flex-direction:column; gap:12px;
+  }
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 14px;
+    background:linear-gradient(180deg, rgba(17,24,39,0.92), rgba(15,23,42,0.92));
+    border:1px solid var(--line);
+    border-radius:14px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.35);
+  }
+  .title{
+    font-weight:700; letter-spacing:0.2px; font-size:21px;
+    display:flex; align-items:center; gap:10px;
+  }
+  .pill{
+    font-size:17px; color:var(--muted);
+    padding:5px 9px; border:1px solid var(--line);
+    border-radius:999px; background:rgba(0,0,0,0.18);
+  }
+  .controls{display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end}
+  select, button{
+    background:rgba(0,0,0,0.22);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:10px 12px;
+    border-radius:10px;
+    font-size:17px;
+  }
+  select{ background-color:#0f1a2a; }
+  select option{ background-color:#0f1a2a; color:#ffffff; }
+  button{cursor:pointer}
+  button:hover{border-color:#334155}
+  .main{
+    display:grid;
+    grid-template-columns: 1fr 420px;
+    gap:12px;
+    position:relative;
+  }
+
+  .inferBtn{
+    position:absolute;
+    left:0;
+    top:0;
+    padding:10px 14px;
+    border-radius:10px;
+    font-size:17px;
+    font-weight:700;
+    background:rgba(0,0,0,0.30);
+    border:1px solid var(--line);
+    color:var(--text);
+    box-shadow:0 10px 30px rgba(0,0,0,0.35);
+    transform:none;
+    z-index:5;
+  }
+  .inferBtn:hover{border-color:#334155}
+  .inferBtn:disabled{opacity:0.55; cursor:not-allowed}
+  .inferBtn.running{
+    border-color: rgba(96,165,250,0.65);
+  }
+  .inferBtn.running::after{
+    content:"";
+    display:inline-block;
+    width:14px; height:14px;
+    margin-left:10px;
+    border-radius:999px;
+    border:2px solid rgba(229,231,235,0.25);
+    border-top-color: rgba(229,231,235,0.85);
+    animation: spin 0.8s linear infinite;
+    vertical-align: -2px;
+  }
+  @keyframes spin{ to{ transform: rotate(360deg);} }
+  .card{
+    background:linear-gradient(180deg, rgba(17,24,39,0.92), rgba(15,23,42,0.92));
+    border:1px solid var(--line);
+    border-radius:14px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.35);
+    overflow:hidden;
+  }
+  .boardWrap{
+    padding:14px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:640px;
+  }
+  .axisWrap{
+    display:grid;
+    grid-template-columns: 34px auto;
+    grid-template-rows: 34px auto;
+    gap:8px;
+    align-items:start;
+    justify-items:start;
+  }
+  .axisCorner{width:34px; height:34px;}
+  .axis{
+    color:var(--muted);
+    font-weight:800;
+    font-size:16px;
+    user-select:none;
+  }
+  .axisTop{display:grid; gap:8px;}
+  .axisLeft{display:grid; gap:8px;}
+  .axisTop .al, .axisLeft .al{
+    display:flex; align-items:center; justify-content:center;
+    width:68px; height:34px;
+    border:1px solid rgba(148,163,184,0.10);
+    border-radius:10px;
+    background:rgba(0,0,0,0.10);
+  }
+  .axisLeft .al{ width:34px; height:68px; }
+  .board{
+    display:grid;
+    gap:8px; /* cell spacing */
+    outline:none;
+  }
+  .cell{
+    width:68px; height:68px;
+    border:1px solid rgba(148,163,184,0.22);
+    border-radius:14px;
+    background:rgba(0,0,0,0.18);
+    display:flex; align-items:center; justify-content:center;
+    user-select:none;
+    position:relative;
+  }
+  .cell:hover{border-color:rgba(148,163,184,0.38)}
+  .cell.sel{
+    border-color:rgba(96,165,250,0.9);
+    box-shadow:0 0 0 3px rgba(96,165,250,0.18);
+  }
+  .cell.flag::after{
+    content:"🚩";
+    position:absolute;
+    font-size:36px;
+  }
+
+
+  /* Input order badge (top-right tiny number) */
+  .ordBadge{
+    position:absolute;
+    top:6px; right:8px;
+    font-size:13px;
+    font-weight:900;
+    color: rgba(103,232,249,0.95);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+    pointer-events:none;
+    user-select:none;
+    line-height:1;
+  }
+
+  /* Normal mode text */
+  .val{
+    font-weight:800;
+    letter-spacing:0.3px;
+    line-height:1;
+  }
+  .val.big{font-size:36px}
+  .val.small{font-size:26px}
+    #board[data-mode="w"] .val.big{font-size:38px}
+    #board[data-mode="w"] .val.small{font-size:28px}
+
+  .val.q{color:#eab308}
+  .val.n{color:var(--text)}
+
+  /* W mode layout */
+  .wgrid{
+    width:100%; height:100%;
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    padding:8px;
+    gap:2px;
+    place-items:center;
+  }
+  .witem{font-weight:800;
+    font-size:28px;
+    line-height:1;
+  }
+  .witem.q{color:#eab308}
+  .witem.center{grid-column:1 / span 2;
+    grid-row:1 / span 2;
+    font-size:38px;
+  }
+  .witem.bottomCenter{grid-column:1 / span 2;
+    grid-row:2;
+    font-size:28px;
+  }
+  .witem.topLeft{grid-column:1; grid-row:1;}
+  .witem.topRight{grid-column:2; grid-row:1;}
+  .witem.bottomLeft{grid-column:1; grid-row:2;}
+  .witem.bottomRight{grid-column:2; grid-row:2;}
+
+  .sideHead{
+    padding:12px 14px;
+    border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  .sideHead .h{
+    font-weight:700; font-size:17px; color:var(--text);
+  }
+
+  .hBtn{
+    appearance:none;
+    background:transparent;
+    border:none;
+    padding:0;
+    margin:0;
+    cursor:pointer;
+    text-align:left;
+    line-height:1.1;
+  }
+  .hBtn:hover{ color: var(--accent); }
+
+  .sideHead .sub{
+    font-size:17px; color:var(--muted);
+  }
+  .sideBody{
+    padding:12px 14px;
+    height: calc(640px + 28px - 72px); /* align with boardWrap min-height; adjusted for meta lines */
+    overflow:auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size:17px;
+    color:#d1d5db;
+    white-space:pre-wrap;
+    word-break:break-word;
+    overflow-x:hidden;
+  }
+
+  .sideMeta{
+    padding:10px 14px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  .metaRow{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .hint{
+    padding:10px 14px;
+    border-top:1px solid var(--line);
+    color:var(--muted);
+    font-size:17px;
+    line-height:1.35;
+  }
+  .kbd{border:1px solid var(--line); padding:1px 6px; border-radius:7px; background:rgba(0,0,0,0.18); color:var(--text)}
+
+  .cell.markSafe{ outline:3px solid rgba(34,197,94,0.85); background: rgba(34,197,94,0.12); }
+  .cell.markMine{ outline:3px solid rgba(239,68,68,0.85); background: rgba(239,68,68,0.12); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="app">
+    <div class="topbar">
+      <div class="title">
+        <span>Solgic 3</span>
+        <span class="pill" id="modePill">Mode: Normal</span>
+      </div>
+      <div class="controls">
+        <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
+          Mode
+          <select id="modeSel">
+<option value="normal" selected>Normal</option>
+<option value="w">W</option>
+          </select>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
+          Size
+          <select id="sizeSel">
+            <option>5</option><option>6</option><option selected>7</option><option>8</option>
+          </select>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
+          Mines
+          <input id="minesInp" type="number" inputmode="numeric" min="0" step="1"
+                 style="width:86px; background:rgba(0,0,0,0.22); border:1px solid var(--line); color:var(--text); padding:10px 12px; border-radius:10px; font-size:17px;" />
+        </label>
+
+        <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
+          Preset
+          <select id="minesPresetSel" onchange="window.__syncMinesFromPreset && window.__syncMinesFromPreset()">
+            <option value="">Custom</option>
+            <option value="8">8</option>
+            <option value="10">10</option>
+            <option value="14" selected>14</option>
+            <option value="20">20</option>
+            <option value="26">26</option>
+          </select>
+        </label>
+        <button id="copyBtn" title="Copy size/mines/board">Copy</button>
+        <button id="pasteBtn" title="Paste size/mines/board">Paste</button>
+        <button id="clearBtn" title="Clear board">Clear</button>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="card">
+        <div class="boardWrap">
+          <div class="axisWrap">
+            <div class="axisCorner"></div>
+            <div id="axisTop" class="axis axisTop" aria-hidden="true"></div>
+            <div id="axisLeft" class="axis axisLeft" aria-hidden="true"></div>
+            <div id="board" class="board" tabindex="0" aria-label="board"></div>
+          </div>
+        </div>
+      </div>
+
+      <button id="inferBtn" class="inferBtn" title="Infer (placeholder)">추론</button>
+
+      <div class="card" id="stateCard">
+        <div class="sideHead">
+          <button id="stateDumpBtn" class="h hBtn" title="Copy State dump">State</button>
+        </div>
+        <div class="sideMeta">
+          <div class="metaRow">
+            <div class="sub" id="selInfo">No selection</div>
+            <div class="sub" id="lastInfo">—</div>
+          </div>
+          <div class="sub" id="fileInfo">File: —</div>
+        </div>
+        <div id="stateBox" class="sideBody"></div>
+        <div class="hint">
+  Normal:
+  <span class="kbd">L</span> click cycles <b>empty → ? → 0 → 15 → empty</b>. Keys <span class="kbd">0-9</span> set immediately. <span class="kbd">R</span> toggles flag.
+  <br/>
+  W:
+  <span class="kbd">L</span> selects slot1. Keys <span class="kbd">0-8</span>/<span class="kbd">?</span> auto-commit and advance. <span class="kbd">R</span> toggles flag (clears all slots).
+</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const boardEl = document.getElementById('board');
+  const axisTopEl = document.getElementById('axisTop');
+  const axisLeftEl = document.getElementById('axisLeft');
+
+  const modeSel = document.getElementById('modeSel');
+  const sizeSel = document.getElementById('sizeSel');
+  const minesInp = document.getElementById('minesInp');
+  const minesPresetSel = document.getElementById('minesPresetSel');
+
+  const copyBtn = document.getElementById('copyBtn');
+  const pasteBtn = document.getElementById('pasteBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const inferBtn = document.getElementById('inferBtn');
+
+  const stateBox = document.getElementById('stateBox');
+  const selInfo = document.getElementById('selInfo');
+  const lastInfo = document.getElementById('lastInfo');
+  const fileInfo = document.getElementById('fileInfo');
+  const stateDumpBtn = document.getElementById('stateDumpBtn');
+  const modePill = document.getElementById('modePill');
+
+  // show current file name
+  if (fileInfo){
+    const fn = (location && location.pathname ? location.pathname.split('/').pop() : '') || document.title || '—';
+    fileInfo.textContent = 'File: ' + fn;
+  }
+
+  // ============================
+  // Core STATE (UI only)
+  // ============================
+  const STATE = {
+    mode: 'normal', // 'normal' | 'w'
+    n: 7,
+    mines: 0,
+    normal: [],
+    w: [],
+    marks: [], // 2D overlay: null | 'safe' | 'mine'
+
+    sel: {x:null, y:null},
+    last: null,
+    err: null,
+    // engine-free: keep a tiny event/interval registry so modes can clean up
+    _cleanup: [],
+
+    // Input order (for top-right badge): increments whenever a cell is edited (set/flag/clear)
+    orderCounter: 0,
+    orderActive: false,
+    order: [], // 2D array: null | number
+  };
+
+  function clamp(n,min,max){ return Math.max(min, Math.min(max,n)); }
+  function mkNormalCell(){ return {kind:'empty'}; }
+  function mkWCell(){ return {flag:false, slots:[{kind:'empty'},{kind:'empty'},{kind:'empty'},{kind:'empty'}], focus:0}; }
+
+  // ===== Input order badge helpers =====
+  function __isCellEmptyForOrder(mode, x, y){
+    if (mode === 'w'){
+      const c = STATE.w[y][x];
+      if (c.flag) return false;
+      for (let k=0;k<4;k++){
+        if (c.slots[k] && c.slots[k].kind !== 'empty') return false;
+      }
+      return true;
+    }
+    const c = STATE.normal[y][x];
+    return !c || c.kind === 'empty';
+  }
+  function __clearOrder(x,y){
+    if (!STATE.order || !STATE.order[y]) return;
+    STATE.order[y][x] = null;
+  }
+  function __nextOrder(){
+    // Option 2: next number is based on current max order on the board (ignores deleted history).
+    // This avoids gaps like 1,2,3,4,8 and instead continues as 1,2,3,4,5.
+    let max = 0;
+    if (!STATE.order) return 1;
+    for (let yy=0; yy<STATE.order.length; yy++){
+      const row = STATE.order[yy];
+      if (!row) continue;
+      for (let xx=0; xx<row.length; xx++){
+        const v = row[xx];
+        if (typeof v === 'number' && v > max) max = v;
+      }
+    }
+    return max + 1;
+  }
+
+  function __bumpOrder(x,y){
+    if (!STATE.order || !STATE.order[y]) return;
+    // Assign an order number only once per cell (until it becomes empty).
+    // This prevents intermediate edits on the same cell (e.g., empty->?->num)
+    // from consuming multiple order numbers.
+    if (STATE.order[y][x] != null) return;
+    const next = __nextOrder();
+    STATE.orderCounter = next;
+    STATE.order[y][x] = next;
+  }
+  function touchOrder(x,y){
+    // Call after mutating a cell:
+    // - If cell becomes empty => clear its order.
+    // - If cell is non-empty => assign order ONLY if it doesn't already have one.
+    if (!STATE.orderActive){ __clearOrder(x,y); return; }
+    if (__isCellEmptyForOrder(STATE.mode, x, y)) {
+      __clearOrder(x,y);
+    } else {
+      __bumpOrder(x,y);
+    }
+  }
+
+  function initBoards(n){
+    STATE.n = n;
+    STATE.normal = Array.from({length:n}, _ => Array.from({length:n}, _ => mkNormalCell()));
+    STATE.w = Array.from({length:n}, _ => Array.from({length:n}, _ => mkWCell()));
+    STATE.marks = Array.from({length:n}, _ => Array.from({length:n}, _ => null));
+    STATE.orderCounter = 0;
+    STATE.orderActive = false;
+    STATE.order = Array.from({length:n}, _ => Array.from({length:n}, _ => null));
+    STATE.sel = {x:null,y:null};
+    STATE.last = null;
+    STATE.err = null;
+
+    const cap = n*n;
+    STATE.mines = clamp(Number.isFinite(+STATE.mines) ? +STATE.mines : 0, 0, cap);
+    minesInp.max = String(cap);
+    minesInp.value = String(STATE.mines);
+  }
+
+  function clearMarkAt(x,y){
+    if (!STATE.marks || !STATE.marks[y]) return;
+    STATE.marks[y][x] = null;
+  }
+  function clearMarks(){
+    const n = STATE.n|0;
+    for (let yy=0; yy<n; yy++){
+      for (let xx=0; xx<n; xx++){
+        STATE.marks[yy][xx] = null;
+      }
+    }
+  }
+  function __parseLabel(s){
+    if (!s || typeof s !== 'string') return null;
+    const m = /^([A-Z])([0-9]+)$/.exec(s.trim());
+    if (!m) return null;
+    const x = m[1].charCodeAt(0) - 65;
+    const y = parseInt(m[2],10) - 1;
+    if (!(x>=0 && y>=0 && x<STATE.n && y<STATE.n)) return null;
+    return {x,y};
+  }
+  function applyDeductions(out){
+    if (!out || typeof out !== 'object') return;
+    const mine = Array.isArray(out.mine) ? out.mine : [];
+    const safe = Array.isArray(out.safe) ? out.safe : [];
+    const io = buildIO();
+    // Only mark on unopened/unknown cells
+    for (const s of safe){
+      const p = __parseLabel(s);
+      if (!p) continue;
+      const c = io.board[p.y][p.x];
+      if (c && c.t === 'e') STATE.marks[p.y][p.x] = 'safe';
+    }
+    for (const s of mine){
+      const p = __parseLabel(s);
+      if (!p) continue;
+      const c = io.board[p.y][p.x];
+      if (c && c.t === 'e') STATE.marks[p.y][p.x] = 'mine';
+    }
+  }
+
+
+  // ============================
+  // Mode registry (prevents "꼬임")
+  // ============================
+  const modeRegistry = Object.create(null);
+
+  function registerMode(id, def){
+    modeRegistry[id] = Object.assign({
+      id,
+      label: id,
+      init(){},
+      dispose(){},
+      infer(){ return {ok:false, msg:'no infer'}; },
+      ioMode: id.toUpperCase(),
+    }, def || {});
+  }
+
+  function runCleanup(){
+    const list = STATE._cleanup.splice(0);
+    for (const fn of list){
+      try{ fn(); }catch(_e){}
+    }
+  }
+
+  function setMode(m){
+    // dispose old
+    const prev = modeRegistry[STATE.mode];
+    if (prev && typeof prev.dispose === 'function'){
+      try{ prev.dispose(); }catch(_e){}
+    }
+    runCleanup();
+
+    STATE.mode = m;
+
+    const def = modeRegistry[m] || {label:m};
+    modePill.textContent = 'Mode: ' + (def.label || m);
+
+    // init new
+    if (def && typeof def.init === 'function'){
+      try{ def.init(); }catch(_e){}
+    }
+
+    render();
+    dump();
+  }
+
+  // ============================
+  // Normal / W input logic (UI only)
+  // ============================
+  function isSelected(x,y){ return STATE.sel.x === x && STATE.sel.y === y; }
+
+  function selectCell(x,y){
+    STATE.sel = {x,y};
+    if (STATE.mode === 'w'){
+      const cell = STATE.w[y][x];
+      cell.focus = 0;
+    }
+    boardEl.focus({preventScroll:true});
+    render();
+    dump();
+  }
+
+  function toggleFlag(x,y){
+    if (STATE.mode === 'w'){
+      const c = STATE.w[y][x];
+      if (c.flag){
+        c.flag = false;
+        c.slots = [{kind:'empty'},{kind:'empty'},{kind:'empty'},{kind:'empty'}];
+        c.focus = 0;
+        STATE.last = {x,y, value:'unflag'};
+      } else {
+        c.flag = true;
+        c.slots = [{kind:'empty'},{kind:'empty'},{kind:'empty'},{kind:'empty'}];
+        c.focus = 0;
+        STATE.last = {x,y, value:'flag'};
+      }
+    } else {
+      const c = STATE.normal[y][x];
+      if (c.kind === 'flag'){
+        STATE.normal[y][x] = {kind:'empty'};
+        STATE.last = {x,y, value:'empty'};
+      } else {
+        STATE.normal[y][x] = {kind:'flag'};
+        STATE.last = {x,y, value:'flag'};
+      }
+    }
+    touchOrder(x,y);
+    render();
+    dump();
+  }
+
+  function normalLeftClick(x,y){
+    const c = STATE.normal[y][x];
+    if (c.kind === 'flag') return;
+
+    if (c.kind === 'empty'){
+      STATE.normal[y][x] = {kind:'q'};
+      STATE.last = {x,y, value:'?'};
+      touchOrder(x,y);
+      return;
+    }
+    if (c.kind === 'q'){
+      STATE.normal[y][x] = {kind:'num', v:0};
+      STATE.last = {x,y, value:0};
+      touchOrder(x,y);
+      return;
+    }
+    if (c.kind === 'num'){
+      const nv = (c.v + 1) % 16; // 0..15
+      STATE.normal[y][x] = {kind:'num', v:nv};
+      STATE.last = {x,y, value:nv};
+      touchOrder(x,y);
+      return;
+    }
+  }
+
+  function wLeftClick(x,y){
+    const c = STATE.w[y][x];
+    c.focus = 0;
+    STATE.last = {x,y, value: c.flag ? 'select(flagged)' : 'select(slot1)'};
+  }
+
+  function setNormalByKey(x,y,digit){
+    const c = STATE.normal[y][x];
+    if (c.kind === 'flag') return;
+    STATE.normal[y][x] = {kind:'num', v:digit};
+    touchOrder(x,y);
+    STATE.last = {x,y, value:digit, via:'key'};
+  }
+
+  function setWSlotAndAdvance(x,y, valKind, valNum){
+    const cell = STATE.w[y][x];
+    if (cell.flag) return;
+    const i = clamp(cell.focus,0,3);
+    if (valKind === 'num'){
+      cell.slots[i] = {kind:'num', v:valNum};
+      STATE.last = {x,y, slot:i+1, value:valNum};
+    } else if (valKind === 'q'){
+      cell.slots[i] = {kind:'q'};
+      STATE.last = {x,y, slot:i+1, value:'?'};
+    }
+    cell.focus = (i + 1) % 4;
+    touchOrder(x,y);
+  }
+
+  function onCellMouseDown(e){
+    const el = e.target.closest('.cell');
+    if (!el) return;
+    const x = +el.dataset.x, y = +el.dataset.y;
+    e.preventDefault();
+    selectCell(x,y);
+    clearMarkAt(x,y);
+
+    if (e.button === 2){
+      toggleFlag(x,y);
+      return;
+    }
+    if (e.button === 0){
+      if (STATE.mode === 'w') wLeftClick(x,y);
+      else normalLeftClick(x,y);
+      render();
+      dump();
+      return;
+    }
+  }
+
+  // ============================
+  // Rendering
+  // ============================
+  function render(){
+    const n = STATE.n;
+    boardEl.dataset.mode = STATE.mode;
+    boardEl.style.gridTemplateColumns = `repeat(${n}, 68px)`;
+
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    axisTopEl.style.gridTemplateColumns = `repeat(${n}, 68px)`;
+    axisTopEl.innerHTML = '';
+    for (let x=0;x<n;x++){
+      const d = document.createElement('div');
+      d.className = 'al';
+      d.textContent = letters[x] || String(x+1);
+      axisTopEl.appendChild(d);
+    }
+    axisLeftEl.style.gridTemplateRows = `repeat(${n}, 68px)`;
+    axisLeftEl.innerHTML = '';
+    for (let y=0;y<n;y++){
+      const d = document.createElement('div');
+      d.className = 'al';
+      d.textContent = String(y+1);
+      axisLeftEl.appendChild(d);
+    }
+
+    boardEl.innerHTML = '';
+    for (let y=0;y<n;y++){
+      for (let x=0;x<n;x++){
+        const cell = document.createElement('div');
+        cell.className = 'cell' + (isSelected(x,y) ? ' sel':'');
+        const mk = (STATE.marks && STATE.marks[y]) ? STATE.marks[y][x] : null;
+        if (mk === 'safe') cell.classList.add('markSafe');
+        else if (mk === 'mine') cell.classList.add('markMine');
+        cell.dataset.x = x; cell.dataset.y = y;
+
+        if (STATE.mode === 'w'){
+          const c = STATE.w[y][x];
+          if (c.flag){
+            cell.classList.add('flag');
+          } else {
+            const filled = [];
+            for (let i=0;i<4;i++){
+              const s = c.slots[i];
+              if (s.kind === 'num') filled.push({kind:'num', v:s.v});
+              else if (s.kind === 'q') filled.push({kind:'q'});
+            }
+            const grid = document.createElement('div');
+            grid.className = 'wgrid';
+
+            const count = filled.length;
+            function txt(item){ return item.kind === 'q' ? '?' : String(item.v); }
+            function cls(item){ return item.kind === 'q' ? 'q' : 'n'; }
+            function addItem(text, clsName){
+              const d = document.createElement('div');
+              d.className = 'witem ' + clsName;
+              d.textContent = text;
+              grid.appendChild(d);
+            }
+
+            if (count === 1){
+              addItem(txt(filled[0]), cls(filled[0]) + ' center');
+            } else if (count === 2){
+              addItem(txt(filled[0]), cls(filled[0]) + ' topLeft');
+              addItem(txt(filled[1]), cls(filled[1]) + ' topRight');
+            } else if (count === 3){
+              addItem(txt(filled[0]), cls(filled[0]) + ' topLeft');
+              addItem(txt(filled[1]), cls(filled[1]) + ' topRight');
+              addItem(txt(filled[2]), cls(filled[2]) + ' bottomCenter');
+            } else if (count >= 4){
+              addItem(txt(filled[0]), cls(filled[0]) + ' topLeft');
+              addItem(txt(filled[1]), cls(filled[1]) + ' topRight');
+              addItem(txt(filled[2]), cls(filled[2]) + ' bottomLeft');
+              addItem(txt(filled[3]), cls(filled[3]) + ' bottomRight');
+            }
+            cell.appendChild(grid);
+          }
+        } else {
+          const c = STATE.normal[y][x];
+          if (c.kind === 'flag'){
+            cell.classList.add('flag');
+          } else if (c.kind === 'q'){
+            const t = document.createElement('div');
+            t.className = 'val big q';
+            t.textContent = '?';
+            cell.appendChild(t);
+          } else if (c.kind === 'num'){
+            const t = document.createElement('div');
+            t.className = 'val big n';
+            t.textContent = String(c.v);
+            cell.appendChild(t);
+          }
+        }
+
+
+        // Input order badge (top-right)
+        if (STATE.orderActive && STATE.order && STATE.order[y] && STATE.order[y][x] != null){
+          const b = document.createElement('div');
+          b.className = 'ordBadge';
+          b.textContent = String(STATE.order[y][x]);
+          cell.appendChild(b);
+        }
+
+        boardEl.appendChild(cell);
+      }
+    }
+
+    if (STATE.sel.x == null){
+      selInfo.textContent = 'No selection';
+    } else {
+      if (STATE.mode === 'w'){
+        const c = STATE.w[STATE.sel.y][STATE.sel.x];
+        selInfo.textContent = `Selected: (${STATE.sel.x},${STATE.sel.y}) slot=${c.focus+1}`;
+      } else {
+        selInfo.textContent = `Selected: (${STATE.sel.x},${STATE.sel.y})`;
+      }
+    }
+    lastInfo.textContent = STATE.last ? 'last: ' + JSON.stringify(STATE.last) : '—';
+
+    requestAnimationFrame(placeInferBtn);
+  }
+
+  function placeInferBtn(){
+    const main = document.querySelector('.main');
+    const stateCard = document.getElementById('stateCard');
+    if (!main || !stateCard) return;
+
+    const mainR = main.getBoundingClientRect();
+    const gridR = boardEl.getBoundingClientRect();
+    const stateR = stateCard.getBoundingClientRect();
+    const btnR = inferBtn.getBoundingClientRect();
+
+    const btnW = btnR.width || 60;
+    const btnH = btnR.height || 34;
+
+    const gapMidX = (gridR.right + stateR.left) / 2;
+    const gridMidY = gridR.top + gridR.height / 2;
+
+    inferBtn.style.left = `${Math.round(gapMidX - mainR.left - btnW/2)}px`;
+    inferBtn.style.top  = `${Math.round(gridMidY - mainR.top - btnH/2)}px`;
+  }
+
+  // ============================
+  // IO format (copy/paste)
+  // ============================
+  function buildIO(){
+    const n = STATE.n;
+    if (STATE.mode === 'w'){
+      return {
+        mode: 'W',
+        size: n,
+        mines: STATE.mines,
+        board: STATE.w.map(row => row.map(c => {
+          if (c.flag) return {t:'f'};
+          return {
+            t:'w',
+            s: c.slots.map(sl => {
+              if (sl.kind === 'empty') return {t:'e'};
+              if (sl.kind === 'q') return {t:'q'};
+              return {t:'n', v: (sl.v|0)};
+            })
+          };
+        }))
+      };
+    }
+    // normal: use normal grid tokens
+    const def = modeRegistry[STATE.mode] || {ioMode:'N'};
+    return {
+      mode: String(def.ioMode || 'N'),
+      size: n,
+      mines: STATE.mines,
+      board: STATE.normal.map(row => row.map(c => {
+        if (c.kind === 'empty') return {t:'e'};
+        if (c.kind === 'q') return {t:'q'};
+        if (c.kind === 'flag') return {t:'f'};
+        return {t:'n', v: (c.v|0)};
+      }))
+    };
+  }
+
+  async function copyIO(){
+    const txt = JSON.stringify(buildIO());
+    try{
+      await navigator.clipboard.writeText(txt);
+      STATE.err = null;
+      STATE.last = {copy:'ok'};
+    }catch(_e){
+      prompt('Copy JSON', txt);
+      STATE.last = {copy:'prompt'};
+    }
+    dump();
+  }
+
+  async function copyStateDump(){
+    const parts = [];
+    if (selInfo && selInfo.textContent) parts.push(selInfo.textContent);
+    if (fileInfo && fileInfo.textContent) parts.push(fileInfo.textContent);
+    if (lastInfo && lastInfo.textContent) parts.push(lastInfo.textContent);
+
+    try{
+      const io = buildIO();
+      // for State dump, keep only mode/size/mines (no board)
+      delete io.board;
+      parts.push('');
+      parts.push('IO:');
+      parts.push(JSON.stringify(io));
+    }catch(_e){}
+
+    try{
+      parts.push('');
+      parts.push('STATE:');
+      parts.push((stateBox && (stateBox.innerText || stateBox.textContent)) ? (stateBox.innerText || stateBox.textContent) : '');
+    }catch(_e){}
+
+    const txt = parts.join('\n');
+    try{
+      await navigator.clipboard.writeText(txt);
+      STATE.err = null;
+      STATE.last = {state:'copied'};
+    }catch(_e){
+      prompt('Copy State dump', txt);
+      STATE.last = {state:'prompt'};
+    }
+    dump();
+  }
+
+  async function pasteIO(){
+    let txt = '';
+    try{ txt = await navigator.clipboard.readText(); }catch(_e){}
+    if (!txt) txt = prompt('Paste JSON');
+    if (!txt) return;
+
+    let obj;
+    try{ obj = JSON.parse(txt); }
+    catch(_e){ STATE.err = 'Paste failed: invalid JSON'; dump(); return; }
+
+    const n = Math.trunc(+obj.size || 0);
+    const mines = Math.trunc(+obj.mines || 0);
+    if (!n || !Array.isArray(obj.board)){ STATE.err = 'Paste failed: missing fields'; dump(); return; }
+
+    // size must be supported by UI
+    const sizes = Array.from(sizeSel.options).map(o => o.textContent.trim());
+    if (!sizes.includes(String(n))){
+      STATE.err = 'Paste failed: unsupported size';
+      dump();
+      return;
+    }
+    sizeSel.value = String(n);
+    initBoards(n);
+
+    // mines
+    const cap = n*n;
+    const mv = clamp(mines, 0, cap);
+    STATE.mines = mv;
+    minesInp.value = String(mv);
+    if (minesPresetSel){
+      const sv = String(mv);
+      minesPresetSel.value = (sv==='8'||sv==='10'||sv==='14'||sv==='20'||sv==='26') ? sv : '';
+    }
+
+    // mode + board
+    const m = String(obj.mode || '').toUpperCase();
+    if (m === 'W'){
+      if (modeSel) modeSel.value = 'w';
+      setMode('w');
+      for (let y=0; y<n; y++){
+        for (let x=0; x<n; x++){
+          const tok = obj.board?.[y]?.[x];
+          if (!tok) continue;
+          const cell = STATE.w[y][x];
+          if (tok.t === 'f'){
+            cell.flag = true;
+            cell.slots = [{kind:'empty'},{kind:'empty'},{kind:'empty'},{kind:'empty'}];
+            cell.focus = 0;
+          } else if (tok.t === 'w' && Array.isArray(tok.s)){
+            cell.flag = false;
+            cell.slots = tok.s.slice(0,4).map(sl => {
+              if (!sl || sl.t === 'e') return {kind:'empty'};
+              if (sl.t === 'q') return {kind:'q'};
+              if (sl.t === 'n') return {kind:'num', v: Math.trunc(+sl.v || 0)};
+              return {kind:'empty'};
+            });
+            while(cell.slots.length < 4) cell.slots.push({kind:'empty'});
+            cell.focus = 0;
+          }
+        }
+      }
+    } else {
+      // default to normal
+      if (modeSel) modeSel.value = 'normal';
+      setMode('normal');
+      for (let y=0; y<n; y++){
+        for (let x=0; x<n; x++){
+          const tok = obj.board?.[y]?.[x];
+          if (!tok) continue;
+          const cell = STATE.normal[y][x];
+          if (tok.t === 'e') cell.kind = 'empty';
+          else if (tok.t === 'q') cell.kind = 'q';
+          else if (tok.t === 'f') cell.kind = 'flag';
+          else if (tok.t === 'n'){ cell.kind = 'num'; cell.v = Math.trunc(+tok.v || 0); }
+          else cell.kind = 'empty';
+        }
+      }
+    }
+
+    STATE.err = null;
+    STATE.last = {paste:'ok'};
+    render();
+    dump();
+  }
+
+  // ============================
+  // State panel dump (engine-free)
+  // ============================
+  function dump(){
+    const payload = buildIO();
+    const head = [];
+    if (STATE.err) head.push('ERROR: ' + STATE.err);
+
+    const n = payload.size|0;
+    let nums=0, flags=0, qs=0, empties=0, ws=0;
+    for (let y=0;y<n;y++){
+      for (let x=0;x<n;x++){
+        const c = payload.board[y][x];
+        if (c.t === 'n' || c.t === 'p') nums++;
+        else if (c.t === 'f') flags++;
+        else if (c.t === 'q') qs++;
+        else if (c.t === 'w') ws++;
+        else empties++;
+      }
+    }
+    head.push(`MODE: ${payload.mode} | SIZE: ${n} | MINES: ${payload.mines}`);
+    head.push(`Nums:${nums} Flags:${flags} Qs:${qs} Wcells:${ws} Empty:${empties}`);
+
+    const extra = [];
+    if (STATE.last){
+      if (STATE.last.note) extra.push(String(STATE.last.note));
+      if (Array.isArray(STATE.last.checkLines) && STATE.last.checkLines.length){
+        extra.push('');
+        extra.push('CHECK:');
+        for (const ln of STATE.last.checkLines) extra.push('- ' + ln);
+      }
+      if (Array.isArray(STATE.last.mine) || Array.isArray(STATE.last.safe)){
+        const mines = Array.isArray(STATE.last.mine) ? STATE.last.mine : [];
+        const safes = Array.isArray(STATE.last.safe) ? STATE.last.safe : [];
+        if (mines.length || safes.length){
+          extra.push('');
+          extra.push('DEDUCE:');
+          extra.push('MINE: ' + (mines.length ? mines.join(', ') : '—'));
+          extra.push('SAFE: ' + (safes.length ? safes.join(', ') : '—'));
+        }
+      }
+    }
+
+    const rows = [];
+    for (let y=0;y<n;y++){
+      const parts = [];
+      for (let x=0;x<n;x++){
+        const c = payload.board[y][x];
+        if (c.t === 'e') parts.push('.');
+        else if (c.t === 'q') parts.push('?');
+        else if (c.t === 'f') parts.push('F');
+        else if (c.t === 'n') parts.push(String(c.v));
+        else if (c.t === 'p'){
+          const dd = String(c.d || '').toUpperCase();
+          const arrow = (dd === 'V') ? '↕' : (dd === 'H') ? '↔' : '';
+          parts.push(arrow + String(c.v));
+        }
+        else if (c.t === 'w'){
+          // show W cell as [a,b,c,d] compact
+          const s = (c.s||[]).map(sl => sl.t === 'n' ? String(sl.v) : (sl.t === 'q' ? '?' : '.'));
+          parts.push('[' + s.join('') + ']');
+        } else parts.push('?');
+      }
+      rows.push(parts.join(' '));
+    }
+
+    const parts = [];
+    parts.push(head.join('\n'));
+    if (extra.length) parts.push(extra.join('\n'));
+    parts.push('');
+    parts.push(rows.join('\n'));
+    stateBox.textContent = parts.join('\n');
+  }
+
+  // ============================
+  // Keyboard input
+  // ============================
+  function onKeyDown(e){
+    if (STATE.sel.x == null) return;
+    const x = STATE.sel.x, y = STATE.sel.y;
+    clearMarkAt(x,y);
+
+    if (e.key === 'r' || e.key === 'R'){
+      e.preventDefault();
+      toggleFlag(x,y);
+      return;
+    }
+
+    if (e.key === '?' || e.key === 'q' || e.key === 'Q'){
+      e.preventDefault();
+      if (STATE.mode === 'w'){
+        setWSlotAndAdvance(x,y,'q');
+      } else {
+        const c = STATE.normal[y][x];
+        if (c.kind === 'flag') return;
+        STATE.normal[y][x] = {kind:'q'};
+        STATE.last = {x,y,value:'?', via:'key'};
+        touchOrder(x,y);
+      }
+      render(); dump();
+      return;
+    }
+
+    if (e.key >= '0' && e.key <= '9'){
+      const d = e.key.charCodeAt(0) - 48;
+      e.preventDefault();
+      if (STATE.mode === 'w'){
+        if (d <= 8) setWSlotAndAdvance(x,y,'num', d);
+      } else {
+        setNormalByKey(x,y,d);
+      }
+      render(); dump();
+      return;
+    }
+
+    if (e.key === 'Backspace' || e.key === 'Delete'){
+      e.preventDefault();
+      if (STATE.mode === 'w'){
+        const c = STATE.w[y][x];
+        c.flag = false;
+        c.slots = [{kind:'empty'},{kind:'empty'},{kind:'empty'},{kind:'empty'}];
+        c.focus = 0;
+        STATE.last = {x,y,value:'clear'};
+      } else {
+        if (STATE.normal[y][x].kind !== 'flag'){
+          STATE.normal[y][x] = {kind:'empty'};
+          STATE.last = {x,y,value:'empty'};
+        }
+      }
+      render(); dump();
+      return;
+    }
+  }
+
+  // ============================
+  // Infer button (delegates to mode; currently engine-free)
+  // ============================
+  function inferNow(){
+    // Start input-order numbering *after* the first Infer click
+    if (!STATE.orderActive){
+      STATE.orderActive = true;
+      STATE.orderCounter = 0;
+      // wipe any previous (pre-infer) order marks
+      if (Array.isArray(STATE.order)){
+        for (let yy=0; yy<STATE.n; yy++){
+          for (let xx=0; xx<STATE.n; xx++) STATE.order[yy][xx] = null;
+        }
+      }
+    }
+    const def = modeRegistry[STATE.mode];
+    if (!def || typeof def.infer !== 'function'){
+      STATE.last = {infer:'noop'};
+      dump();
+      return;
+    }
+    clearMarks();
+    const out = def.infer(buildIO(), STATE);
+    STATE.last = Object.assign({infer:'done'}, out && typeof out === 'object' ? out : {});
+    applyDeductions(STATE.last);
+    render();
+    dump();
+  }
+
+  // ============================
+  // Wire events
+  // ============================
+  boardEl.addEventListener('contextmenu', e => e.preventDefault());
+  boardEl.addEventListener('mousedown', onCellMouseDown);
+  document.addEventListener('keydown', onKeyDown);
+
+  if (modeSel){
+    modeSel.addEventListener('change', () => {
+      setMode(modeSel.value);
+    });
+  }
+
+  if (sizeSel){
+    sizeSel.addEventListener('change', () => { initBoards(+sizeSel.value); render(); dump(); });
+  }
+
+  if (minesInp){
+    minesInp.addEventListener('change', () => {
+      const cap = STATE.n * STATE.n;
+      const v = clamp(Math.trunc(+minesInp.value || 0), 0, cap);
+      STATE.mines = v;
+      minesInp.value = String(v);
+      STATE.last = {mines:v};
+      if (minesPresetSel){
+        const sv = String(v);
+        minesPresetSel.value = (sv==='8'||sv==='10'||sv==='14'||sv==='20'||sv==='26') ? sv : '';
+      }
+      dump();
+    });
+  }
+
+  if (minesPresetSel){
+    minesPresetSel.addEventListener('change', () => {
+      if (!minesPresetSel.value) return;
+      minesInp.value = minesPresetSel.value;
+      minesInp.dispatchEvent(new Event('change'));
+    });
+  }
+
+  if (copyBtn) copyBtn.addEventListener('click', copyIO);
+  if (pasteBtn) pasteBtn.addEventListener('click', pasteIO);
+  if (clearBtn) clearBtn.addEventListener('click', () => { initBoards(STATE.n); render(); dump(); });
+  if (stateDumpBtn) stateDumpBtn.addEventListener('click', copyStateDump);
+  if (inferBtn) inferBtn.addEventListener('click', inferNow);
+
+  // ============================
+  // Register modes
+  // ============================
+  registerMode('normal', {
+    label: 'Normal',
+    ioMode: 'N',
+    infer(){
+      return {note:'(no engine)'}; // placeholder
+    }
+  });
+
+  registerMode('w', {
+    label: 'W',
+    ioMode: 'W',
+    infer(){
+      return {note:'(no engine)'};
+    }
+  });
+
+  // boot
+  initBoards(+sizeSel.value || 7);
+  minesInp.dispatchEvent(new Event('change'));
+  setMode('normal');
+})();
+</script>
+</body>
+</html>
