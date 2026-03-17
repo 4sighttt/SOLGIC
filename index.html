@@ -397,11 +397,14 @@ End memo.
   const stateDumpBtn = document.getElementById('stateDumpBtn');
   const modePill = document.getElementById('modePill');
 
-  // show current file name
-  if (fileInfo){
-    const fn = (location && location.pathname ? location.pathname.split('/').pop() : '') || document.title || '—';
-    fileInfo.textContent = 'File: ' + fn;
+  // show engine/app info
+  function updateEngineInfo(){
+    if (!fileInfo) return;
+    const appVer = document.title || 'Solgic3';
+    const engVer = (typeof ENGINE_2G_VERSION !== 'undefined') ? ENGINE_2G_VERSION : '—';
+    fileInfo.textContent = `Engine: ${engVer} | App: ${appVer}`;
   }
+  updateEngineInfo();
 
   // ============================
   // Core STATE (UI only)
@@ -1195,6 +1198,7 @@ End memo.
     const out = def.infer(buildIO(), STATE);
     STATE.last = Object.assign({infer:'done'}, out && typeof out === 'object' ? out : {});
     applyDeductions(STATE.last);
+    updateEngineInfo();
     render();
     dump();
   }
