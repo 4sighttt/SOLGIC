@@ -304,8 +304,7 @@ End memo.
 <option value="normal" selected>Normal</option>
 <option value="w">W</option>
 <option value="2g">2G</option>
-            <option value="C">C Mode</option>
-</select>
+          </select>
         </label>
         <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
           Size
@@ -1286,22 +1285,5 @@ End memo.
   setMode('normal');
 })();
 </script>
-
-<script type="module">
-import { solveCMode } from './engine-c.js';
-window.solveCMode = solveCMode;
-</script>
-<script>
-(function(){
-  const oldSolve = window.solve;
-  window.solve = function(board, mode){
-    if(mode === 'C' && window.solveCMode){
-      return window.solveCMode(board);
-    }
-    return oldSolve ? oldSolve(board, mode) : null;
-  };
-})();
-</script>
-
 </body>
 </html>
