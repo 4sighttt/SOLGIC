@@ -1,7 +1,7 @@
-<!DOCTYPE html>
-
+<!doctype html>
 <html lang="en">
 <head>
+
 <!--
 [BOYOUNG_INTERNAL_MEMO_TILE_STATES]
 Tile semantics (IMPORTANT):
@@ -13,8 +13,9 @@ Tile semantics (IMPORTANT):
 Rule: NEVER generate or display SAFE/MINE actions on '?' tiles.
 End memo.
 -->
+
 <meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Solgic3-0.0.0</title>
 <style>
   :root{
@@ -290,82 +291,89 @@ End memo.
 </head>
 <body>
 <div class="wrap">
-<div class="app">
-<div class="topbar">
-<div class="title">
-<span>Solgic 3</span>
-<span class="pill" id="modePill">Mode: Normal</span>
-</div>
-<div class="controls">
-<label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
+  <div class="app">
+    <div class="topbar">
+      <div class="title">
+        <span>Solgic 3</span>
+        <span class="pill" id="modePill">Mode: Normal</span>
+      </div>
+      <div class="controls">
+        <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
           Mode
           <select id="modeSel">
-<option selected="" value="normal">Normal</option>
+<option value="normal" selected>Normal</option>
 <option value="w">W</option>
 <option value="2g">2G</option>
+            <option value="C">C Mode</option>
 </select>
-</label>
-<label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
           Size
           <select id="sizeSel">
-<option>5</option><option>6</option><option selected="">7</option><option>8</option>
-</select>
-</label>
-<label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
+            <option>5</option><option>6</option><option selected>7</option><option>8</option>
+          </select>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
           Mines
-          <input id="minesInp" inputmode="numeric" min="0" step="1" style="width:86px; background:rgba(0,0,0,0.22); border:1px solid var(--line); color:var(--text); padding:10px 12px; border-radius:10px; font-size:17px;" type="number"/>
-</label>
-<label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
+          <input id="minesInp" type="number" inputmode="numeric" min="0" step="1"
+                 style="width:86px; background:rgba(0,0,0,0.22); border:1px solid var(--line); color:var(--text); padding:10px 12px; border-radius:10px; font-size:17px;" />
+        </label>
+
+        <label style="display:flex; align-items:center; gap:8px; font-size:17px; color:var(--muted)">
           Preset
-          <select id="minesPresetSel" onchange="window.__syncMinesFromPreset &amp;&amp; window.__syncMinesFromPreset()">
-<option value="">Custom</option>
-<option value="8">8</option>
-<option value="10">10</option>
-<option selected="" value="14">14</option>
-<option value="20">20</option>
-<option value="26">26</option>
-</select>
-</label>
-<button id="copyBtn" title="Copy size/mines/board">Copy</button>
-<button id="pasteBtn" title="Paste size/mines/board">Paste</button>
-<button id="clearBtn" title="Clear board">Clear</button>
-</div>
-</div>
-<div class="main">
-<div class="card">
-<div class="boardWrap">
-<div class="axisWrap">
-<div class="axisCorner"></div>
-<div aria-hidden="true" class="axis axisTop" id="axisTop"></div>
-<div aria-hidden="true" class="axis axisLeft" id="axisLeft"></div>
-<div aria-label="board" class="board" id="board" tabindex="0"></div>
-</div>
-</div>
-</div>
-<button class="inferBtn" id="inferBtn" title="Infer (placeholder)">추론</button>
-<div class="card" id="stateCard">
-<div class="sideHead">
-<button class="h hBtn" id="stateDumpBtn" title="Copy State dump">State</button>
-</div>
-<div class="sideMeta">
-<div class="metaRow">
-<div class="sub" id="selInfo">No selection</div>
-<div class="sub" id="lastInfo">—</div>
-</div>
-<div class="sub" id="fileInfo">File: —</div>
-</div>
-<div class="sideBody" id="stateBox"></div>
-<div class="hint">
+          <select id="minesPresetSel" onchange="window.__syncMinesFromPreset && window.__syncMinesFromPreset()">
+            <option value="">Custom</option>
+            <option value="8">8</option>
+            <option value="10">10</option>
+            <option value="14" selected>14</option>
+            <option value="20">20</option>
+            <option value="26">26</option>
+          </select>
+        </label>
+        <button id="copyBtn" title="Copy size/mines/board">Copy</button>
+        <button id="pasteBtn" title="Paste size/mines/board">Paste</button>
+        <button id="clearBtn" title="Clear board">Clear</button>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="card">
+        <div class="boardWrap">
+          <div class="axisWrap">
+            <div class="axisCorner"></div>
+            <div id="axisTop" class="axis axisTop" aria-hidden="true"></div>
+            <div id="axisLeft" class="axis axisLeft" aria-hidden="true"></div>
+            <div id="board" class="board" tabindex="0" aria-label="board"></div>
+          </div>
+        </div>
+      </div>
+
+      <button id="inferBtn" class="inferBtn" title="Infer (placeholder)">추론</button>
+
+      <div class="card" id="stateCard">
+        <div class="sideHead">
+          <button id="stateDumpBtn" class="h hBtn" title="Copy State dump">State</button>
+        </div>
+        <div class="sideMeta">
+          <div class="metaRow">
+            <div class="sub" id="selInfo">No selection</div>
+            <div class="sub" id="lastInfo">—</div>
+          </div>
+          <div class="sub" id="fileInfo">File: —</div>
+        </div>
+        <div id="stateBox" class="sideBody"></div>
+        <div class="hint">
   Normal:
   <span class="kbd">L</span> click cycles <b>empty → ? → 0 → 15 → empty</b>. Keys <span class="kbd">0-9</span> set immediately. <span class="kbd">R</span> toggles flag.
   <br/>
   W:
   <span class="kbd">L</span> selects slot1. Keys <span class="kbd">0-8</span>/<span class="kbd">?</span> auto-commit and advance. <span class="kbd">R</span> toggles flag (clears all slots).
 </div>
+      </div>
+    </div>
+  </div>
 </div>
-</div>
-</div>
-</div>
+
 <script src="engine-2g.js"></script>
 <script>
 (() => {
@@ -1278,5 +1286,22 @@ End memo.
   setMode('normal');
 })();
 </script>
-<script type="module">import { solveCMode } from './engine-c.js'; window.solveCMode = solveCMode;</script></body>
+
+<script type="module">
+import { solveCMode } from './engine-c.js';
+window.solveCMode = solveCMode;
+</script>
+<script>
+(function(){
+  const oldSolve = window.solve;
+  window.solve = function(board, mode){
+    if(mode === 'C' && window.solveCMode){
+      return window.solveCMode(board);
+    }
+    return oldSolve ? oldSolve(board, mode) : null;
+  };
+})();
+</script>
+
+</body>
 </html>
