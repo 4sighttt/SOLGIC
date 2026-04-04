@@ -5,7 +5,7 @@
 
 'use strict';
 
-const ENGINE_2G_VERSION = 'engine-2g v203';
+const ENGINE_2G_VERSION = 'engine-2g v204';
 
 function infer2G(io){
       const n=io.size|0, minesTarget=io.mines|0;
@@ -792,6 +792,40 @@ function infer2G(io){
           enumGroups([...comp],new Set(compSet));
 
           if(allCompletions.length===0) continue;
+
+          // ---------------------------------------------------------------
+          // Pattern 0 (completion adjacency safe):
+          // unknown 셀 Y가 어떤 완성에도 포함되지 않으면서,
+          // 모든 완성의 4방향 이웃에 항상 포함되면 → Y가 지뢰일 경우
+          // Y의 그룹은 반드시 이 컴포넌트의 완성 그룹과 4방향 인접 → 2G 위반 → Y=SAFE
+          // ---------------------------------------------------------------
+          {
+            // 완성에 등장하는 셀 합집합
+            const inAnyCompletion=new Set();
+            for(const g of allCompletions) for(const c of g) inAnyCompletion.add(c);
+
+            // 각 완성의 4방향 이웃 합집합 (완성 내부 셀 제외)
+            const completionAdjSets=allCompletions.map(g=>{
+              const gset=new Set(g);
+              const adj=new Set();
+              for(const c of g) for(const nb of neigh4[c]) if(!gset.has(nb)) adj.add(nb);
+              return adj;
+            });
+
+            for(const y of unknownSet){
+              if(ksSet.has(y)||kmSet.has(y)) continue;
+              if(inAnyCompletion.has(y)) continue; // Y가 완성 후보이면 대상 아님
+              // 모든 완성에 대해 Y가 4방향 인접인지 확인
+              let adjAll=true;
+              for(const adjSet of completionAdjSets){
+                if(!adjSet.has(y)){adjAll=false;break;}
+              }
+              if(adjAll){
+                const lb=lbl(...xy(y));
+                if(!safeArr.includes(lb)){safeArr.push(lb);changed=true;}
+              }
+            }
+          }
 
           // 각 숫자 제약에 대해 커버리지 분석
           for(const c of numCons){
