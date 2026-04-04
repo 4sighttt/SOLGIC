@@ -159,80 +159,81 @@ function infer2G(io){
           return true;
         }
 
-        // 셀 C를 포함하는 유효한 4칸 연결 그룹 존재 여부 탐색
-        // 숫자 제약 조기 차단으로 가지치기 강화
-        // extraFixed: 가정 그룹을 임시 fixedMine으로 취급하는 추가 셀 Set (재귀 호출용)
-        function hasValidGroupFor(startCell, extraFixed){
-          const ef = extraFixed || new Set();
-          // 임시 컴포넌트 계산: fixedMineSet + extraFixed
-          const allFixed = new Set([...fixedMineSet, ...ef]);
-          const efVisited = new Set();
-          const efComponents = [];
-          for(const start of allFixed){
-            if(efVisited.has(start)) continue;
-            const comp = new Set();
-            const q2 = [start]; efVisited.add(start);
-            while(q2.length){
-              const cur = q2.shift(); comp.add(cur);
-              for(const nb of neigh4[cur]){
-                if(!efVisited.has(nb) && allFixed.has(nb)){
-                  efVisited.add(nb); q2.push(nb);
-                }
+        // 가정 지뢰 Set 기준으로 숫자 제약 전파 → 확정 safe 셀 반환
+        function propagateSafe(assumedMines){
+          const tmpSafe = new Set();
+          const tmpMine = new Set(assumedMines);
+          for(let i=0;i<N;i++){
+            if(asnCell[i]===0) tmpSafe.add(i);
+            else if(asnCell[i]===1) tmpMine.add(i);
+          }
+          let changed = true;
+          while(changed){
+            changed = false;
+            for(const c of numCons){
+              let m = c.fixedM;
+              const unk = [];
+              for(const j of c.vs){
+                if(tmpMine.has(j)) m++;
+                else if(!tmpSafe.has(j)) unk.push(j);
+              }
+              const rem = c.v - m;
+              if(rem < 0) return null; // 모순
+              if(rem > unk.length) return null; // 모순
+              if(rem === 0){
+                for(const j of unk){ if(!tmpSafe.has(j)){ tmpSafe.add(j); changed=true; } }
+              }
+              if(rem === unk.length && rem > 0){
+                for(const j of unk){ if(!tmpMine.has(j)){ tmpMine.add(j); changed=true; } }
               }
             }
-            efComponents.push(comp);
           }
-          const efCellToComp = new Map();
-          for(const comp of efComponents)
-            for(const c of comp) efCellToComp.set(c, comp);
+          return tmpSafe;
+        }
 
+        // 셀 C를 포함하는 유효한 4칸 연결 그룹 존재 여부 탐색
+        // assumedMines: 이미 지뢰로 가정된 셀들 (재귀 호출용)
+        // extraSafe: 이미 safe로 확정된 셀들 (재귀 호출용, mineAvail 필터링)
+        // visitedComps: 이미 검사한 컴포넌트 시작 셀 (무한재귀 방지)
+        function hasValidGroupFor(startCell, assumedMines, extraSafe, visitedComps){
+          const aMines = assumedMines || new Set();
+          const eSafe = extraSafe || new Set();
+          const visited = visitedComps || new Set();
+          if(visited.has(startCell)) return true; // 이미 검사 완료로 간주
+          visited.add(startCell);
           let found = false;
           function dfs(cells, cset){
             if(found) return;
-            // 조기 차단: 현재까지 추가된 셀로 이미 숫자 제약 초과면 중단
             for(const con of numCons){
               let m = con.fixedM;
-              for(const j of con.vs) if(cset.has(j)) m++;
+              for(const j of con.vs) if(cset.has(j)||aMines.has(j)) m++;
               if(m > con.v) return;
             }
             if(cells.length === 4){
               if(!isValidGroup(cells)) return;
-              // 2G 그룹 간 인접 충돌 검사:
-              // 이 그룹과 4방향 인접한 다른 fixedMine 컴포넌트(extraFixed 포함)가
-              // 이 그룹과 합쳐져 4칸을 초과하는지 체크
-              const gset = new Set(cells);
-              for(const c of cells){
-                for(const nb of neigh4[c]){
-                  if(gset.has(nb)) continue;
-                  if(!allFixed.has(nb)) continue;
-                  const nbComp = efCellToComp.get(nb);
-                  if(!nbComp) continue;
-                  // 이 컴포넌트 중 gset 밖에 있는 셀 수
-                  const outside = [...nbComp].filter(x => !gset.has(x));
-                  if(outside.length + cells.length > 4){ return; }
+              // assumedMines(가정 그룹)와의 4방향 인접 충돌 체크
+              // isValidGroup은 fixedMineSet만 체크하므로 가정 그룹과의 충돌은 별도 체크
+              if(aMines.size > 0){
+                const gset = new Set(cells);
+                for(const c of cells){
+                  for(const nb of neigh4[c]){
+                    if(gset.has(nb)) continue;
+                    if(aMines.has(nb) && !fixedMineSet.has(nb)){
+                      // nb가 가정 그룹의 일부 → 두 그룹이 인접 → 2G 위반
+                      return;
+                    }
+                  }
                 }
               }
-              // 인접 충돌 없음: 이 그룹을 임시 고정으로 추가하고
-              // 기존 미완성 fixedMine 컴포넌트들이 여전히 완성 가능한지 검사
-              const newEf = new Set([...allFixed, ...cells]);
-              // startCell의 컴포넌트만 검사 (다른 컴포넌트는 별도 hasValidGroupFor로 처리)
-              // 이 그룹이 fixedMineSet의 미완성 컴포넌트를 흡수하는 경우 체크
-              for(const comp of efComponents){
-                if(comp.size >= 4) continue; // 이미 완성
-                // 이 컴포넌트가 현재 그룹(cells)에 인접하지 않으면 무관
-                let adjacent = false;
-                for(const c of comp){
-                  for(const nb of neigh4[c]){
-                    if(gset.has(nb)){ adjacent = true; break; }
-                  }
-                  if(adjacent) break;
-                }
-                if(!adjacent) continue;
-                // 이 컴포넌트가 현재 그룹에 흡수되지 않았으면 (gset과 겹치지 않으면)
-                // 현재 그룹을 extraFixed로 추가한 상태에서 완성 가능한지 검사
-                const compStart = [...comp].find(c => !gset.has(c));
-                if(compStart === undefined) continue; // 완전히 흡수됨
-                if(!hasValidGroupFor(compStart, newEf)) return;
+              const newMines = new Set([...aMines, ...cells]);
+              const propSafe = propagateSafe(newMines);
+              if(propSafe === null) return;
+              // 인접한 미완성 fixedMine 컴포넌트 검사
+              for(const comp of flagComponents){
+                if(comp.size >= 4) continue;
+                const compStart = [...comp][0];
+                if(visited.has(compStart)) continue; // 이미 검사됨
+                if(!hasValidGroupFor(compStart, newMines, propSafe, new Set(visited))) return;
               }
               found = true;
               return;
@@ -240,8 +241,9 @@ function infer2G(io){
             for(const c of cells){
               for(const nb of neigh4[c]){
                 if(cset.has(nb)) continue;
-                if(!mineAvail.has(nb) && !ef.has(nb)) continue;
-                if(ef.has(nb)) continue; // extraFixed 셀은 확장 대상 아님
+                if(!mineAvail.has(nb)) continue;
+                if(eSafe.has(nb)) continue;
+                if(aMines.has(nb)) continue; // 이미 다른 그룹에 사용된 셀 제외
                 cset.add(nb); cells.push(nb);
                 dfs(cells, cset);
                 cells.pop(); cset.delete(nb);
