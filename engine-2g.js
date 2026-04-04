@@ -192,15 +192,12 @@ function infer2G(io){
         }
 
         // 셀 C를 포함하는 유효한 4칸 연결 그룹 존재 여부 탐색
-        // assumedMines: 이미 지뢰로 가정된 셀들 (재귀 호출용)
-        // extraSafe: 이미 safe로 확정된 셀들 (재귀 호출용, mineAvail 필터링)
-        // visitedComps: 이미 검사한 컴포넌트 시작 셀 (무한재귀 방지)
-        function hasValidGroupFor(startCell, assumedMines, extraSafe, visitedComps){
+        // assumedMines: 이미 지뢰로 가정된 셀들
+        // extraSafe: propSafe로 확정된 safe 셀들 (mineAvail 필터링)
+        // isRecursive: true이면 flagComponent 재귀 검사 수행하지 않음 (depth 제한)
+        function hasValidGroupFor(startCell, assumedMines, extraSafe, isRecursive){
           const aMines = assumedMines || new Set();
           const eSafe = extraSafe || new Set();
-          const visited = visitedComps || new Set();
-          if(visited.has(startCell)) return true; // 이미 검사 완료로 간주
-          visited.add(startCell);
           let found = false;
           function dfs(cells, cset){
             if(found) return;
@@ -211,29 +208,38 @@ function infer2G(io){
             }
             if(cells.length === 4){
               if(!isValidGroup(cells)) return;
-              // assumedMines(가정 그룹)와의 4방향 인접 충돌 체크
-              // isValidGroup은 fixedMineSet만 체크하므로 가정 그룹과의 충돌은 별도 체크
+              // assumedMines와의 4방향 인접 충돌 체크
               if(aMines.size > 0){
                 const gset = new Set(cells);
                 for(const c of cells){
                   for(const nb of neigh4[c]){
                     if(gset.has(nb)) continue;
-                    if(aMines.has(nb) && !fixedMineSet.has(nb)){
-                      // nb가 가정 그룹의 일부 → 두 그룹이 인접 → 2G 위반
-                      return;
-                    }
+                    if(aMines.has(nb) && !fixedMineSet.has(nb)) return;
                   }
                 }
               }
-              const newMines = new Set([...aMines, ...cells]);
-              const propSafe = propagateSafe(newMines);
-              if(propSafe === null) return;
-              // 인접한 미완성 fixedMine 컴포넌트 검사
-              for(const comp of flagComponents){
-                if(comp.size >= 4) continue;
-                const compStart = [...comp][0];
-                if(visited.has(compStart)) continue; // 이미 검사됨
-                if(!hasValidGroupFor(compStart, newMines, propSafe, new Set(visited))) return;
+              // 재귀 검사: depth=0일 때만 실행 (depth=1에서는 수행 안 함)
+              if(!isRecursive){
+                const newMines = new Set([...aMines, ...cells]);
+                const propSafe = propagateSafe(newMines);
+                if(propSafe === null) return;
+                // propSafe로 직접 확장 후보(neigh4 mineAvail)가 줄어드는 컴포넌트만 검사
+                for(const comp of flagComponents){
+                  if(comp.size >= 4) continue;
+                  // 이 컴포넌트의 neigh4 mineAvail 셀 중 propSafe에 포함된 게 있는지
+                  let affected = false;
+                  for(const fc of comp){
+                    for(const nb of neigh4[fc]){
+                      if(mineAvail.has(nb) && propSafe.has(nb) && asnCell[nb]===-1){
+                        affected = true; break;
+                      }
+                    }
+                    if(affected) break;
+                  }
+                  if(!affected) continue;
+                  // depth=1로 재귀 (더 이상 재귀 안 함)
+                  if(!hasValidGroupFor([...comp][0], newMines, propSafe, true)) return;
+                }
               }
               found = true;
               return;
@@ -243,7 +249,7 @@ function infer2G(io){
                 if(cset.has(nb)) continue;
                 if(!mineAvail.has(nb)) continue;
                 if(eSafe.has(nb)) continue;
-                if(aMines.has(nb)) continue; // 이미 다른 그룹에 사용된 셀 제외
+                if(aMines.has(nb)) continue;
                 cset.add(nb); cells.push(nb);
                 dfs(cells, cset);
                 cells.pop(); cset.delete(nb);
